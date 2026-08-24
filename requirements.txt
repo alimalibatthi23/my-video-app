@@ -2,3 +2,5 @@ streamlit
 edge-tts
 gTTS
 requests
+deep-translator
+moviepy==1.0.3
