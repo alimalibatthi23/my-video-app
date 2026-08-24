@@ -1,85 +1,87 @@
 import asyncio
 import os
-import time
+import re
+import urllib.parse
 import edge_tts
-from gtts import gTTS
+import requests
 import streamlit as st
 
-# Streamlit UI Configuration
 st.set_page_config(
-    page_title="Text to Video & Audio Generator", layout="centered"
+    page_title="Documentary Video Generator", layout="centered"
 )
-st.title("Text to Video & Audio Generator")
+st.title("🎬 Documentary Audio & Realistic Multi-Image Generator")
 
-# Selection for Voice Languages
 selected_voice = st.selectbox(
-    "Select Voice/Language",
-    options=[
-        "en-US-ChristopherNeural (English Male)",
-        "en-US-JennyNeural (English Female)",
-        "ur-PK-AsadNeural (Urdu Male)",
-        "ur-PK-UzmaNeural (Urdu Female)",
-        "hi-IN-MadhurNeural (Hindi Male)",
-        "hi-IN-SwaraNeural (Hindi Female)",
-    ],
+    "Select Voice", options=["ur-PK-AsadNeural (Urdu Male Documentary Voice)"]
 )
-
-# Extract technical voice code
 voice_code = selected_voice.split(" ")[0]
 
-# User Text Input Box
-text_input = st.text_area("Enter your script / text here:", height=150)
+text_input = st.text_area(
+    "Enter your full documentary script here:", height=180
+)
 
 
-# Robust Audio Generator Function
+# Voice Generator
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  fallback_voices = [
-      preferred_voice,
-      "en-US-ChristopherNeural",
-      "en-US-JennyNeural",
-      "ur-PK-AsadNeural",
-      "hi-IN-MadhurNeural",
-  ]
+  CUSTOM_PITCH = "-15Hz"
+  CUSTOM_RATE = "-12%"
+  communicate = edge_tts.Communicate(
+      text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
+  )
+  await communicate.save(output_filename)
+  return True
 
-  voices_to_try = list(dict.fromkeys(fallback_voices))
 
-  # 1. Edge-TTS Retries
-  for voice in voices_to_try:
-    for attempt in range(2):
-      try:
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(output_filename)
+# Realistic 8K Image Generator
+def generate_realistic_image(scene_prompt: str, index: int):
+  # Strict Documentary Prompts (No Cartoon Guarantee)
+  quality_boost = (
+      ", 8k resolution, photorealistic, cinematic lighting, documentary"
+      " scene, highly detailed, real life photography, shot on 35mm lens"
+  )
+  final_prompt = scene_prompt + quality_boost
+  encoded_prompt = urllib.parse.quote(final_prompt)
 
-        if (
-            os.path.exists(output_filename)
-            and os.path.getsize(output_filename) > 0
-        ):
-          return True
-      except Exception:
-        await asyncio.sleep(2)
+  # Using Flux / Realistic Engine via Pollinations
+  url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&model=flux&nologo=true"
 
-  # 2. Google TTS Fallback
   try:
-    tts = gTTS(text=text, lang="en")
-    tts.save(output_filename)
-    if os.path.exists(output_filename) and os.path.getsize(output_filename) > 0:
-      return True
-  except Exception:
-    pass
+    res = requests.get(url, timeout=30)
+    if res.status_code == 200:
+      img_path = f"scene_{index}.jpg"
+      with open(img_path, "wb") as f:
+        f.write(res.content)
+      return img_path
+  except Exception as e:
+    return None
 
-  raise Exception("Audio generation failed. Please try again.")
 
-
-# Action Button to Produce Audio
-if st.button("Generate Audio"):
+if st.button("Generate Documentary Assets"):
   if not text_input.strip():
-    st.warning("Please write some text before generating!")
+    st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating high quality audio..."):
-      output_file = "output.mp3"
-      try:
-        asyncio.run(generate_audio(text_input, output_file, voice_code))
-        st.success("Audio generated successfully!")
-        st.audio(output_file)
-      except Exception as e:
-        st.error(f"Error: {e}")
+    with st.spinner("Generating deep audio & 8K realistic scenes..."):
+      # 1. Audio Generation
+      audio_path = "output_voice.mp3"
+      asyncio.run(generate_audio(text_input, audio_path, voice_code))
+      st.success("✅ Deep Documentary Voice Generated!")
+      st.audio(audio_path)
+
+      # 2. Split Script into Scenes (Every Sentence = 1 Image)
+      sentences = [
+          s.strip() for s in re.split(r"[।!?,\n]+", text_input) if len(s.strip()) > 5
+      ]
+
+      st.subheader("🖼️ Realistic 8K Documentary Visuals Generated:")
+      cols = st.columns(2)
+
+      for i, sentence in enumerate(sentences):
+        # Translate or pass prompt directly
+        img_file = generate_realistic_image(sentence, i + 1)
+        if img_file:
+          with cols[i % 2]:
+            st.image(
+                img_file,
+                caption=f"Scene {i+1} (4-5 sec): {sentence[:30]}...",
+                use_container_width=True,
+            )
