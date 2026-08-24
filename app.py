@@ -8,35 +8,31 @@ import edge_tts
 import requests
 import streamlit as st
 
+# Page Setup
 st.set_page_config(
     page_title="Documentary Video Generator", layout="centered"
 )
 st.title("🎬 Professional Urdu Documentary Video Generator")
 
-# Embedded Pexels API Key
+# Embedded API Key (No Sidebar Needed)
 PEXELS_API_KEY = (
-    "3Z0S20rEAy3MB9A2IFJhG25UkJzFksRJBB4iAAN9g9sZ9ha0eqTcJslZ"  # Hardcoded Key
+    "3Z0S20rEAy3MB9A2IFJhG25UkJzFksRJBB4iAAN9g9sZ9ha0eqTcJslZ"
 )
 
-# Optional Unsplash Key Input
-unsplash_key = st.sidebar.text_input(
-    "Unsplash API Key (Optional):", type="password"
-)
-
+# Voice Selection
 selected_voice = st.selectbox(
     "Select Voice", options=["ur-PK-AsadNeural (Urdu Male Voice)"]
 )
 voice_code = selected_voice.split(" ")[0]
 
+# Script Input Box
 text_input = st.text_area("Enter your full Urdu script here:", height=180)
 
 
-# 1. Clear & Fast Voice Generator
+# 1. Clear & Fast Voice Generator (+30% Speed)
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
   CUSTOM_PITCH = "+0Hz"
-  CUSTOM_RATE = (
-      "+30%"  # स्पीड बढ़ा दी गई है ताकि आवाज़ बिल्कुल स्लो न लगे
-  )
+  CUSTOM_RATE = "+30%"
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
@@ -52,12 +48,12 @@ def translate_to_english(urdu_text: str):
     return urdu_text
 
 
-# 3. Fetch Video Clip or Photo automatically
+# 3. Fetch Video Clips or Photos
 def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   english_prompt = translate_to_english(scene_prompt_urdu)
   query = urllib.parse.quote(english_prompt)
 
-  # Method 1: Try Pexels Video Clip
+  # Step A: Try Pexels Video Clip
   try:
     headers = {"Authorization": PEXELS_API_KEY}
     video_url = f"https://api.pexels.com/videos/search?query={query}&per_page=1"
@@ -77,7 +73,7 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   except Exception:
     pass
 
-  # Method 2: Try Pexels High Quality Photo
+  # Step B: Try Pexels High Quality Photo
   try:
     headers = {"Authorization": PEXELS_API_KEY}
     photo_url = f"https://api.pexels.com/v1/search?query={query}&per_page=1"
@@ -93,22 +89,7 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   except Exception:
     pass
 
-  # Method 3: Unsplash Photo (Optional)
-  if unsplash_key.strip():
-    try:
-      search_url = f"https://api.unsplash.com/search/photos?query={query}&per_page=1&client_id={unsplash_key.strip()}"
-      res = requests.get(search_url, timeout=10).json()
-      if res.get("results"):
-        img_url = res["results"][0]["urls"]["regular"]
-        img_data = requests.get(img_url, timeout=15).content
-        img_path = f"media_{index:03d}.jpg"
-        with open(img_path, "wb") as f:
-          f.write(img_data)
-        return img_path, "image"
-    except Exception:
-      pass
-
-  # Method 4: AI High Quality Photo (Fallback)
+  # Step C: AI Photo Fallback
   quality_boost = (
       "national geographic cinematic documentary photograph, 8k, real life"
   )
@@ -126,7 +107,7 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
     return None, None
 
 
-# 4. Get Audio Duration
+# 4. Audio Duration Helper
 def get_audio_duration(audio_path):
   cmd = [
       "ffprobe",
@@ -186,12 +167,12 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
     subprocess.run(cmd, check=True)
     temp_clips.append(out_clip)
 
-  # Concat file
+  # Concat File Creation
   with open("input_clips.txt", "w") as f:
     for clip in temp_clips:
       f.write(f"file '{clip}'\n")
 
-  # Merge with main audio
+  # Merge Visuals & Audio
   cmd = [
       "ffmpeg",
       "-y",
@@ -213,7 +194,7 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
   ]
   subprocess.run(cmd, check=True)
 
-  # Cleanup Temp Files
+  # Cleanup
   if os.path.exists("input_clips.txt"):
     os.remove("input_clips.txt")
   for clip in temp_clips:
@@ -226,13 +207,13 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Creating fast-voice documentary..."):
+    with st.spinner("Processing documentary video..."):
       try:
         # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Chunk script (8 words = ~4 to 5 seconds per scene)
+        # Step 2: Split script (~4-5 seconds per scene)
         raw_words = text_input.strip().split()
         chunk_size = 8
         sentences = [
@@ -251,14 +232,14 @@ if st.button("Generate Complete Video"):
         if not media_list:
           st.error("Failed to fetch visuals. Please try again.")
         else:
-          # Step 4: Render Video
+          # Step 4: Final Rendering
           final_video = "final_documentary.mp4"
           create_mixed_documentary(media_list, audio_file, final_video)
 
-          st.success("✅ Fast Voice & Synchronized Video Ready!")
+          st.success("✅ Documentary Generated Successfully!")
           st.video(final_video)
 
-          # Cleanup
+          # Final Cleanup
           for path, _ in media_list:
             if os.path.exists(path):
               os.remove(path)
@@ -266,4 +247,4 @@ if st.button("Generate Complete Video"):
             os.remove(audio_file)
 
       except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error generating video: {e}")
