@@ -3,5 +3,5 @@ edge-tts
 gTTS
 requests
 Pillow
-moviepy==1.0.3
+moviepy
 numpy
