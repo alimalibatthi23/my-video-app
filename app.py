@@ -4,7 +4,7 @@ import re
 import urllib.parse
 from deep_translator import GoogleTranslator
 import edge_tts
-from moviepy.editor import AudioFileClip, ImageSequenceClip
+from moviepy.editor import AudioFileClip, ImageClip, ConcatenateVideoClips
 import requests
 import streamlit as st
 
@@ -23,10 +23,10 @@ text_input = st.text_area(
 )
 
 
-# 1. Deep Urdu Voice Generator
+# 1. Clear & Deep Urdu Voice Generator
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  CUSTOM_PITCH = "-15Hz"
-  CUSTOM_RATE = "-12%"
+  CUSTOM_PITCH = "-10Hz"  # भारी आवाज़
+  CUSTOM_RATE = "-5%"    # सही स्पीड (बहुत स्लो नहीं)
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
@@ -34,7 +34,7 @@ async def generate_audio(text: str, output_filename: str, preferred_voice: str):
   return True
 
 
-# 2. Translate Urdu to English for Accurate AI Prompting
+# 2. Urdu to English Translation for Accurate Visuals
 def translate_to_english(urdu_text: str):
   try:
     translated = GoogleTranslator(source="auto", target="en").translate(
@@ -47,18 +47,15 @@ def translate_to_english(urdu_text: str):
 
 # 3. 8K Realistic Image Generator
 def generate_realistic_image(scene_prompt_urdu: str, index: int):
-  # Urdu to English translation for perfect image match
   english_prompt = translate_to_english(scene_prompt_urdu)
-
   quality_boost = (
       ", 8k resolution, photorealistic cinematic documentary shot, highly"
-      " detailed, national geographic style photography, 35mm photograph,"
-      " real life, NO anime, NO cartoon, NO illustration"
+      " detailed, national geographic photography, real life, 35mm lens, NO"
+      " anime, NO cartoon"
   )
   final_prompt = english_prompt + quality_boost
   encoded_prompt = urllib.parse.quote(final_prompt)
 
-  # Flux Engine for High Realism
   url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&model=flux&nologo=true"
 
   try:
@@ -72,17 +69,20 @@ def generate_realistic_image(scene_prompt_urdu: str, index: int):
     return None
 
 
-# 4. Merge Audio and Images into MP4 Video
-def create_video(image_paths, audio_path, output_video_path):
+# 4. Multi-Image Frame-by-Frame Sync Video Rendering
+def create_synchronized_video(image_paths, audio_path, output_video_path):
   audio_clip = AudioFileClip(audio_path)
-  audio_duration = audio_clip.duration
+  total_duration = audio_clip.duration
 
   num_images = len(image_paths)
-  duration_per_image = max(3.0, audio_duration / num_images)
+  duration_per_image = total_duration / num_images
 
-  video_clip = ImageSequenceClip(
-      image_paths, durations=[duration_per_image] * num_images
-  )
+  clips = []
+  for img_path in image_paths:
+    img_clip = ImageClip(img_path).set_duration(duration_per_image)
+    clips.append(img_clip)
+
+  video_clip = ConcatenateVideoClips(clips, method="compose")
   video_clip = video_clip.set_audio(audio_clip)
 
   video_clip.write_videofile(
@@ -98,23 +98,22 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner(
-        "Translating scenes, generating 8K realism & rendering MP4 video..."
-    ):
+    with st.spinner("Generating deep voice, matching visuals & rendering MP4..."):
       try:
-        # Step 1: Generate Deep Urdu Voice
+        # Step 1: Generate Clear Audio
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Split Script into Sentences
-        sentences = [
-            s.strip()
-            for s in re.split(r"[।!?,\n]+", text_input)
-            if len(s.strip()) > 5
-        ]
+        # Step 2: Clean Split Script Line by Line
+        raw_lines = re.split(r'[\n।!?\.]+', text_input)
+        sentences = [l.strip() for l in raw_lines if len(l.strip()) > 3]
+
+        if not sentences:
+          sentences = [text_input.strip()]
+
         image_files = []
 
-        # Step 3: Generate Matched Realistic Images
+        # Step 3: Generate Matched Images for Each Line
         for i, sentence in enumerate(sentences):
           img = generate_realistic_image(sentence, i)
           if img:
@@ -123,14 +122,14 @@ if st.button("Generate Complete Video"):
         if not image_files:
           st.error("Failed to generate visuals. Please try again.")
         else:
-          # Step 4: Combine into One Single MP4 Video
+          # Step 4: Render Multi-Image Synchronized MP4
           final_video = "final_documentary.mp4"
-          create_video(image_files, audio_file, final_video)
+          create_synchronized_video(image_files, audio_file, final_video)
 
-          st.success("✅ Complete Documentary Video Created!")
+          st.success("✅ Synchronized Multi-Image Video Created!")
           st.video(final_video)
 
-          # Clean up temporary files
+          # Cleanup
           for img in image_files:
             if os.path.exists(img):
               os.remove(img)
