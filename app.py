@@ -31,8 +31,8 @@ text_input = st.text_area("Enter your full Urdu script here:", height=180)
 
 # 1. Deep Dark Voice Generator (-8Hz Pitch)
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  CUSTOM_PITCH = "-8Hz"  # Deep voice
-  CUSTOM_RATE = "+5%"  # Natural pacing
+  CUSTOM_PITCH = "-8Hz"
+  CUSTOM_RATE = "+5%"
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
@@ -80,7 +80,6 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   except Exception:
     pass
 
-  # Fallback to Ultra HD AI Image with crisp English text capability if video fails
   quality_boost = "cinematic documentary masterclass photography, 8k resolution, photorealistic, sharp focus"
   final_prompt = urllib.parse.quote(f"{english_context}, {quality_boost}")
   img_url = f"https://image.pollinations.ai/prompt/{final_prompt}?width=1280&height=720&model=flux&nologo=true&seed={index*55}"
@@ -111,12 +110,12 @@ def get_audio_duration(audio_path):
       audio_path,
   ]
   result = subprocess.run(
-      cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+      cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
   )
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Stitcher with Clean Translated Subtitles (No broken boxes)
+# 5. FFmpeg Stitcher with Dynamic Changing Subtitles per Scene
 def create_mixed_documentary(media_items_with_text, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
   num_items = len(media_items_with_text)
@@ -129,13 +128,12 @@ def create_mixed_documentary(media_items_with_text, audio_path, output_video_pat
   for i, (path, media_type, scene_text) in enumerate(media_items_with_text):
     out_clip = f"clip_{i:03d}.mp4"
     
-    # Translate script chunk to English for clean, professional subtitles without font glitching
+    # Translate and format ONLY this specific chunk's text for its own subtitle
     english_subtitle = translate_to_english(scene_text)
     clean_text = english_subtitle.replace("'", "").replace('"', "").replace(":", "-")
-    if len(clean_text) > 50:
-      clean_text = clean_text[:47] + "..."
+    if len(clean_text) > 45:
+      clean_text = clean_text[:42] + "..."
 
-    # Crisp text filter using standard English font to ensure zero broken boxes
     filter_chain = (
         "scale=1280:720:force_original_aspect_ratio=decrease,"
         "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
@@ -175,15 +173,13 @@ def create_mixed_documentary(media_items_with_text, audio_path, output_video_pat
           out_clip,
       ]
     
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
     temp_clips.append(out_clip)
 
-  # Concat File Creation
   with open("input_clips.txt", "w") as f:
     for clip in temp_clips:
       f.write(f"file '{clip}'\n")
 
-  # Merge Visuals & Audio for seamless Chromebook playback
   cmd = [
       "ffmpeg",
       "-y",
@@ -205,9 +201,8 @@ def create_mixed_documentary(media_items_with_text, audio_path, output_video_pat
       str(total_duration),
       output_video_path,
   ]
-  subprocess.run(cmd, check=True)
+  subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-  # Cleanup
   if os.path.exists("input_clips.txt"):
     os.remove("input_clips.txt")
   for clip in temp_clips:
@@ -220,13 +215,11 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating professional documentary with mixed media & clean subtitles..."):
+    with st.spinner("Generating professional documentary with dynamic changing subtitles..."):
       try:
-        # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Split script into perfect context chunks
         raw_words = text_input.strip().split()
         chunk_size = 7
         sentences = [
@@ -236,7 +229,6 @@ if st.button("Generate Complete Video"):
 
         media_list_with_text = []
 
-        # Step 3: Fetch Media matching context
         for i, sentence in enumerate(sentences):
           m_path, m_type = fetch_media_for_scene(sentence, i)
           if m_path:
@@ -245,14 +237,12 @@ if st.button("Generate Complete Video"):
         if not media_list_with_text:
           st.error("Failed to generate visuals. Please try again.")
         else:
-          # Step 4: Final Rendering
           final_video = "final_documentary.mp4"
           create_mixed_documentary(media_list_with_text, audio_file, final_video)
 
-          st.success("✅ Professional High-Quality Documentary Ready!")
+          st.success("✅ Professional Documentary Ready with Dynamic Subtitles!")
           st.video(final_video)
 
-          # Final Cleanup
           for path, _, _ in media_list_with_text:
             if os.path.exists(path):
               os.remove(path)
