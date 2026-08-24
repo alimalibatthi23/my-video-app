@@ -12,7 +12,7 @@ import streamlit as st
 st.set_page_config(
     page_title="Documentary Video Generator", layout="centered"
 )
-st.title("🎬 Professional YouTube Urdu Documentary Generator")
+st.title("🎬 Professional YouTube Documentary Generator")
 
 # Embedded Pexels API Key
 PEXELS_API_KEY = (
@@ -48,27 +48,50 @@ def translate_to_english(urdu_text: str):
     return urdu_text
 
 
-# 3. Fetch Media (AI Image Generation)
-def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
-  english_prompt = translate_to_english(scene_prompt_urdu)
-  query = urllib.parse.quote(english_prompt)
+# 3. Smart Pexels Stock Video Fetcher (Contextual Video Clips)
+def fetch_pexels_video_for_scene(scene_prompt_urdu: str, index: int):
+  english_context = translate_to_english(scene_prompt_urdu)
+  query = urllib.parse.quote(english_context[:50])  # Use short query for video search
   
-  headers_req = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  headers = {
+      "Authorization": PEXELS_API_KEY
   }
-
-  quality_boost = (
-      "cinematic documentary masterclass photography, highly detailed, 8k resolution, dramatic lighting, photorealistic"
-  )
-  final_prompt = urllib.parse.quote(f"{english_prompt}, {quality_boost}")
-  url = f"https://image.pollinations.ai/prompt/{final_prompt}?width=1280&height=720&model=flux-realism&nologo=true&seed={index*15}"
+  url = f"https://api.pexels.com/videos/search?query={query}&per_page=1"
 
   try:
-    res = requests.get(url, headers=headers_req, timeout=25)
-    if res.status_code == 200 and len(res.content) > 5000:
+    res = requests.get(url, headers=headers, timeout=15)
+    if res.status_code == 200:
+      data = res.json()
+      videos = data.get("videos", [])
+      if videos:
+        # Get HD video file link
+        video_files = videos[0].get("video_files", [])
+        hd_file = next((v for v in video_files if v.get("quality") == "hd" or v.get("width", 0) >= 1280), None)
+        if not hd_file and video_files:
+          hd_file = video_files[0]
+        
+        if hd_file and "link" in hd_file:
+          vid_url = hd_file["link"]
+          vid_res = requests.get(vid_url, timeout=25)
+          if vid_res.status_code == 200 and len(vid_res.content) > 10000:
+            vid_path = f"media_{index:03d}.mp4"
+            with open(vid_path, "wb") as f:
+              f.write(vid_res.content)
+            return vid_path, "video"
+  except Exception:
+    pass
+
+  # Fallback to Pollinations AI Image if video search fails
+  quality_boost = "cinematic documentary photography representing this exact scene, highly detailed, 8k, photorealistic"
+  final_prompt = urllib.parse.quote(f"{english_context}, {quality_boost}")
+  img_url = f"https://image.pollinations.ai/prompt/{final_prompt}?width=1280&height=720&model=flux&nologo=true&seed={index*77}"
+
+  try:
+    img_res = requests.get(img_url, timeout=25)
+    if img_res.status_code == 200 and len(img_res.content) > 8000:
       img_path = f"media_{index:03d}.jpg"
       with open(img_path, "wb") as f:
-        f.write(res.content)
+        f.write(img_res.content)
       return img_path, "image"
   except Exception:
     pass
@@ -94,39 +117,61 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Video Stitcher (Clean Cinematic Style without broken font boxes)
-def create_mixed_documentary(media_items, audio_path, output_video_path):
+# 5. FFmpeg Video Stitcher for Mixed Videos & Images with Subtitles
+def create_mixed_documentary(media_items_with_text, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
-  num_items = len(media_items)
-  duration_per_item = total_duration / num_items
+  num_items = len(media_items_with_text)
+  
+  ideal_duration_per_item = total_duration / num_items
+  duration_per_item = min(ideal_duration_per_item, 8.0)
 
   temp_clips = []
 
-  for i, (path, media_type) in enumerate(media_items):
+  for i, (path, media_type, scene_text) in enumerate(media_items_with_text):
     out_clip = f"clip_{i:03d}.mp4"
     
-    # Clean and error-free filter chain (No broken text boxes, pure cinematic visuals)
+    clean_text = scene_text.replace("'", "").replace('"', "").replace(":", "-")
+    if len(clean_text) > 40:
+      clean_text = clean_text[:37] + "..."
+
     filter_chain = (
         "scale=1280:720:force_original_aspect_ratio=decrease,"
         "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
+        f"drawtext=text='{clean_text}':fontcolor=white:fontsize=28:box=1:boxcolor=black@0.5:boxborderw=4:x=(w-text_w)/2:y=630,"
         "fps=25,format=yuv420p"
     )
 
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-loop",
-        "1",
-        "-i",
-        path,
-        "-t",
-        f"{duration_per_item:.2f}",
-        "-vf",
-        filter_chain,
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        out_clip,
-    ]
+    if media_type == "video":
+      cmd = [
+          "ffmpeg",
+          "-y",
+          "-i",
+          path,
+          "-t",
+          f"{duration_per_item:.2f}",
+          "-vf",
+          filter_chain,
+          "-c:v", "libx264",
+          "-pix_fmt", "yuv420p",
+          "-an",
+          out_clip,
+      ]
+    else:
+      cmd = [
+          "ffmpeg",
+          "-y",
+          "-loop",
+          "1",
+          "-i",
+          path,
+          "-t",
+          f"{duration_per_item:.2f}",
+          "-vf",
+          filter_chain,
+          "-c:v", "libx264",
+          "-pix_fmt", "yuv420p",
+          out_clip,
+      ]
     
     subprocess.run(cmd, check=True)
     temp_clips.append(out_clip)
@@ -136,7 +181,7 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
     for clip in temp_clips:
       f.write(f"file '{clip}'\n")
 
-  # Merge Visuals & Audio with standard encoding for Chromebook playback
+  # Merge Visuals & Audio for Chromebook playback
   cmd = [
       "ffmpeg",
       "-y",
@@ -173,40 +218,40 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating AI cinematic visuals, deep voice, and rendering video..."):
+    with st.spinner("Fetching matching Pexels stock videos, audio & rendering..."):
       try:
         # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Split script (~14 words per scene)
+        # Step 2: Split script into context chunks (~8 words per chunk)
         raw_words = text_input.strip().split()
-        chunk_size = 14
+        chunk_size = 8
         sentences = [
             " ".join(raw_words[i : i + chunk_size])
             for i in range(0, len(raw_words), chunk_size)
         ]
 
-        media_list = []
+        media_list_with_text = []
 
-        # Step 3: Fetch Media
+        # Step 3: Fetch Stock Videos or Fallback Images matching context
         for i, sentence in enumerate(sentences):
-          m_path, m_type = fetch_media_for_scene(sentence, i)
+          m_path, m_type = fetch_pexels_video_for_scene(sentence, i)
           if m_path:
-            media_list.append((m_path, m_type))
+            media_list_with_text.append((m_path, m_type, sentence))
 
-        if not media_list:
+        if not media_list_with_text:
           st.error("Failed to generate visuals. Please try again.")
         else:
-          # Step 4: Final Rendering
+          # Step 4: Final Rendering with Mixed Media & Subtitles
           final_video = "final_documentary.mp4"
-          create_mixed_documentary(media_list, audio_file, final_video)
+          create_mixed_documentary(media_list_with_text, audio_file, final_video)
 
-          st.success("✅ Professional Cinematic Documentary Ready!")
+          st.success("✅ Professional Video Ready with Stock Videos, Subtitles & Chromebook Support!")
           st.video(final_video)
 
           # Final Cleanup
-          for path, _ in media_list:
+          for path, _, _ in media_list_with_text:
             if os.path.exists(path):
               os.remove(path)
           if os.path.exists(audio_file):
