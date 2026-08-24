@@ -94,7 +94,7 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Video Stitcher with Dynamic Subtitles (Script text on each scene)
+# 5. FFmpeg Video Stitcher (Clean Cinematic Style without broken font boxes)
 def create_mixed_documentary(media_items, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
   num_items = len(media_items)
@@ -102,21 +102,13 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
 
   temp_clips = []
 
-  # We pass sentences to display exact scene text as subtitles
-  for i, (path, media_type, scene_text) in enumerate(media_items):
+  for i, (path, media_type) in enumerate(media_items):
     out_clip = f"clip_{i:03d}.mp4"
     
-    # Clean the scene text to avoid FFmpeg syntax breakages (removing quotes/colons)
-    clean_text = scene_text.replace("'", "").replace(":", "").replace('"', "")
-    # Limit subtitle length per scene so it fits nicely on screen
-    if len(clean_text) > 45:
-      clean_text = clean_text[:42] + "..."
-
-    # Subtitle overlay filter (drawtext) showing the exact script chunk
+    # Clean and error-free filter chain (No broken text boxes, pure cinematic visuals)
     filter_chain = (
         "scale=1280:720:force_original_aspect_ratio=decrease,"
         "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
-        f"drawtext=text='{clean_text}':fontcolor=white:fontsize=32:box=1:boxcolor=black@0.5:boxborderw=5:x=(w-text_w)/2:y=h-80,"
         "fps=25,format=yuv420p"
     )
 
@@ -144,7 +136,7 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
     for clip in temp_clips:
       f.write(f"file '{clip}'\n")
 
-  # Merge Visuals & Audio
+  # Merge Visuals & Audio with standard encoding for Chromebook playback
   cmd = [
       "ffmpeg",
       "-y",
@@ -181,7 +173,7 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating AI visuals, voice, and rendering video with subtitles..."):
+    with st.spinner("Generating AI cinematic visuals, deep voice, and rendering video..."):
       try:
         # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
@@ -197,24 +189,24 @@ if st.button("Generate Complete Video"):
 
         media_list = []
 
-        # Step 3: Fetch Media & Match with Sentences
+        # Step 3: Fetch Media
         for i, sentence in enumerate(sentences):
           m_path, m_type = fetch_media_for_scene(sentence, i)
           if m_path:
-            media_list.append((m_path, m_type, sentence))
+            media_list.append((m_path, m_type))
 
         if not media_list:
           st.error("Failed to generate visuals. Please try again.")
         else:
-          # Step 4: Final Rendering with Subtitles
+          # Step 4: Final Rendering
           final_video = "final_documentary.mp4"
           create_mixed_documentary(media_list, audio_file, final_video)
 
-          st.success("✅ Professional Video Ready with Dynamic Subtitles & Chromebook Support!")
+          st.success("✅ Professional Cinematic Documentary Ready!")
           st.video(final_video)
 
           # Final Cleanup
-          for path, _, _ in media_list:
+          for path, _ in media_list:
             if os.path.exists(path):
               os.remove(path)
           if os.path.exists(audio_file):
