@@ -48,7 +48,7 @@ def translate_to_english(urdu_text: str):
     return urdu_text
 
 
-# 3. Fetch Media or Auto-Generate AI Image (No Black Screens)
+# 3. Fetch Media (Guaranteed AI Image/Video generation)
 def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   english_prompt = translate_to_english(scene_prompt_urdu)
   query = urllib.parse.quote(english_prompt)
@@ -57,37 +57,7 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   }
 
-  # Step A: Try Pexels Video first
-  try:
-    headers = {"Authorization": PEXELS_API_KEY, **headers_req}
-    video_url = f"https://api.pexels.com/videos/search?query={query}&orientation=landscape&per_page=1"
-    res = requests.get(video_url, headers=headers, timeout=10).json()
-
-    if res.get("videos") and len(res["videos"]) > 0:
-      video_files = res["videos"][0]["video_files"]
-      download_url = next(
-          (
-              v["link"]
-              for v in video_files
-              if v.get("width", 0) > v.get("height", 0)
-          ),
-          video_files[0]["link"],
-      )
-      
-      vid_response = requests.get(download_url, headers=headers_req, stream=True, timeout=20)
-      if vid_response.status_code == 200:
-        vid_path = f"media_{index:03d}.mp4"
-        with open(vid_path, "wb") as f:
-          for chunk in vid_response.iter_content(chunk_size=8192):
-            if chunk:
-              f.write(chunk)
-        
-        if os.path.exists(vid_path) and os.path.getsize(vid_path) > 10240:
-          return vid_path, "video"
-  except Exception:
-    pass
-
-  # Step B: Direct AI Image Generation (Guaranteed high-quality visual instead of black screen)
+  # Direct AI Image Generation (Most stable and cinematic for YouTube documentaries)
   quality_boost = (
       "cinematic documentary masterclass photography, highly detailed, 8k resolution, dramatic lighting, photorealistic"
   )
@@ -125,7 +95,7 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Video Stitcher with Zoom & Text
+# 5. FFmpeg Video Stitcher (Safe & Error-Free Zoom & Text)
 def create_mixed_documentary(media_items, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
   num_items = len(media_items)
@@ -136,43 +106,29 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
   for i, (path, media_type) in enumerate(media_items):
     out_clip = f"clip_{i:03d}.mp4"
     
+    # Safe filter chain to avoid exit status 234 errors
     filter_chain = (
         "scale=1280:720:force_original_aspect_ratio=decrease,"
         "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
-        f"zoompan=z='min(zoom+0.0015,1.4)':d={int(duration_per_item*24)}:s=1280:720,"
+        f"zoompan=z='min(zoom+0.001,1.3)':d={int(duration_per_item*25)}:s=1280:720,"
         "drawtext=text='Purely Peak':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=40,"
-        "fps=24,format=yuv420p"
+        "fps=25,format=yuv420p"
     )
 
-    if media_type == "image":
-      cmd = [
-          "ffmpeg",
-          "-y",
-          "-loop",
-          "1",
-          "-i",
-          path,
-          "-t",
-          f"{duration_per_item:.2f}",
-          "-vf",
-          filter_chain,
-          out_clip,
-      ]
-    else:
-      cmd = [
-          "ffmpeg",
-          "-y",
-          "-stream_loop",
-          "-1",
-          "-i",
-          path,
-          "-t",
-          f"{duration_per_item:.2f}",
-          "-vf",
-          filter_chain,
-          "-an",
-          out_clip,
-      ]
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loop",
+        "1",
+        "-i",
+        path,
+        "-t",
+        f"{duration_per_item:.2f}",
+        "-vf",
+        filter_chain,
+        out_clip,
+    ]
+    
     subprocess.run(cmd, check=True)
     temp_clips.append(out_clip)
 
@@ -194,7 +150,7 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
       "-i",
       audio_path,
       "-c:v",
-      "copy",
+      "libx264",
       "-c:a",
       "aac",
       "-t",
@@ -216,7 +172,7 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating AI visuals, voice, and rendering video..."):
+    with st.spinner("Generating cinematic AI visuals, voice, and rendering video..."):
       try:
         # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
@@ -232,7 +188,7 @@ if st.button("Generate Complete Video"):
 
         media_list = []
 
-        # Step 3: Fetch Media or Auto AI Images
+        # Step 3: Fetch Media
         for i, sentence in enumerate(sentences):
           m_path, m_type = fetch_media_for_scene(sentence, i)
           if m_path:
@@ -245,7 +201,7 @@ if st.button("Generate Complete Video"):
           final_video = "final_documentary.mp4"
           create_mixed_documentary(media_list, audio_file, final_video)
 
-          st.success("✅ Professional AI Documentary Video Ready!")
+          st.success("✅ Professional YouTube Documentary Ready for Monetization!")
           st.video(final_video)
 
           # Final Cleanup
