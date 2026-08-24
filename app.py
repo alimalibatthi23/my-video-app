@@ -13,6 +13,16 @@ st.set_page_config(
 )
 st.title("🎬 Professional Urdu Documentary Video Generator")
 
+# Embedded Pexels API Key
+PEXELS_API_KEY = (
+    "3Z0S20rEAy3MB9A2IFJhG25UkJzFksRJBB4iAAN9g9sZ9ha0eqTcJslZ"  # Hardcoded Key
+)
+
+# Optional Unsplash Key Input
+unsplash_key = st.sidebar.text_input(
+    "Unsplash API Key (Optional):", type="password"
+)
+
 selected_voice = st.selectbox(
     "Select Voice", options=["ur-PK-AsadNeural (Urdu Male Voice)"]
 )
@@ -21,11 +31,12 @@ voice_code = selected_voice.split(" ")[0]
 text_input = st.text_area("Enter your full Urdu script here:", height=180)
 
 
-# 1. Clear, Fast & Natural Urdu Voice Generator
+# 1. Clear & Fast Voice Generator
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  # Normal speed & clear voice (no pitch lag)
   CUSTOM_PITCH = "+0Hz"
-  CUSTOM_RATE = "+5%"  # आवाज़ की स्पीड थोड़ी बढ़ा दी है ताकि स्लो न लगे
+  CUSTOM_RATE = (
+      "+30%"  # स्पीड बढ़ा दी गई है ताकि आवाज़ बिल्कुल स्लो न लगे
+  )
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
@@ -41,28 +52,78 @@ def translate_to_english(urdu_text: str):
     return urdu_text
 
 
-# 3. 8K Realistic Image Generator
-def generate_realistic_image(scene_prompt_urdu: str, index: int):
+# 3. Fetch Video Clip or Photo automatically
+def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   english_prompt = translate_to_english(scene_prompt_urdu)
-  quality_boost = (
-      ", 8k resolution, photorealistic cinematic documentary shot, highly"
-      " detailed, national geographic photography, real life, 35mm lens, NO"
-      " anime, NO cartoon"
-  )
-  final_prompt = english_prompt + quality_boost
-  encoded_prompt = urllib.parse.quote(final_prompt)
+  query = urllib.parse.quote(english_prompt)
 
-  url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&model=flux&nologo=true"
+  # Method 1: Try Pexels Video Clip
+  try:
+    headers = {"Authorization": PEXELS_API_KEY}
+    video_url = f"https://api.pexels.com/videos/search?query={query}&per_page=1"
+    res = requests.get(video_url, headers=headers, timeout=10).json()
+
+    if res.get("videos") and len(res["videos"]) > 0:
+      video_files = res["videos"][0]["video_files"]
+      download_url = next(
+          (v["link"] for v in video_files if v.get("height") == 720),
+          video_files[0]["link"],
+      )
+      vid_data = requests.get(download_url, timeout=20).content
+      vid_path = f"media_{index:03d}.mp4"
+      with open(vid_path, "wb") as f:
+        f.write(vid_data)
+      return vid_path, "video"
+  except Exception:
+    pass
+
+  # Method 2: Try Pexels High Quality Photo
+  try:
+    headers = {"Authorization": PEXELS_API_KEY}
+    photo_url = f"https://api.pexels.com/v1/search?query={query}&per_page=1"
+    res = requests.get(photo_url, headers=headers, timeout=10).json()
+
+    if res.get("photos") and len(res["photos"]) > 0:
+      img_url = res["photos"][0]["src"]["large2x"]
+      img_data = requests.get(img_url, timeout=15).content
+      img_path = f"media_{index:03d}.jpg"
+      with open(img_path, "wb") as f:
+        f.write(img_data)
+      return img_path, "image"
+  except Exception:
+    pass
+
+  # Method 3: Unsplash Photo (Optional)
+  if unsplash_key.strip():
+    try:
+      search_url = f"https://api.unsplash.com/search/photos?query={query}&per_page=1&client_id={unsplash_key.strip()}"
+      res = requests.get(search_url, timeout=10).json()
+      if res.get("results"):
+        img_url = res["results"][0]["urls"]["regular"]
+        img_data = requests.get(img_url, timeout=15).content
+        img_path = f"media_{index:03d}.jpg"
+        with open(img_path, "wb") as f:
+          f.write(img_data)
+        return img_path, "image"
+    except Exception:
+      pass
+
+  # Method 4: AI High Quality Photo (Fallback)
+  quality_boost = (
+      "national geographic cinematic documentary photograph, 8k, real life"
+  )
+  final_prompt = urllib.parse.quote(f"{english_prompt}, {quality_boost}")
+  url = f"https://image.pollinations.ai/prompt/{final_prompt}?width=1280&height=720&model=flux-realism&nologo=true&seed={index*10}"
 
   try:
-    res = requests.get(url, timeout=35)
+    res = requests.get(url, timeout=25)
     if res.status_code == 200:
-      img_path = f"scene_{index:03d}.jpg"
+      img_path = f"media_{index:03d}.jpg"
       with open(img_path, "wb") as f:
         f.write(res.content)
-      return img_path
+      return img_path, "image"
   except Exception:
-    return None
+    return None, None
 
 
 # 4. Get Audio Duration
@@ -83,20 +144,54 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Video Creator with Exact Image Timing
-def create_ffmpeg_video(image_paths, audio_path, output_video_path):
+# 5. FFmpeg Video Stitcher
+def create_mixed_documentary(media_items, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
-  num_images = len(image_paths)
-  duration_per_image = total_duration / num_images
+  num_items = len(media_items)
+  duration_per_item = total_duration / num_items
 
-  # Create FFmpeg concat file with exact timing per scene
-  with open("input.txt", "w") as f:
-    for img in image_paths:
-      f.write(f"file '{img}'\n")
-      f.write(f"duration {duration_per_image:.2f}\n")
-    f.write(f"file '{image_paths[-1]}'\n")
+  temp_clips = []
 
-  # Run FFmpeg command
+  for i, (path, media_type) in enumerate(media_items):
+    out_clip = f"clip_{i:03d}.mp4"
+    if media_type == "image":
+      cmd = [
+          "ffmpeg",
+          "-y",
+          "-loop",
+          "1",
+          "-i",
+          path,
+          "-t",
+          f"{duration_per_item:.2f}",
+          "-vf",
+          "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+          out_clip,
+      ]
+    else:
+      cmd = [
+          "ffmpeg",
+          "-y",
+          "-stream_loop",
+          "-1",
+          "-i",
+          path,
+          "-t",
+          f"{duration_per_item:.2f}",
+          "-vf",
+          "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+          "-an",
+          out_clip,
+      ]
+    subprocess.run(cmd, check=True)
+    temp_clips.append(out_clip)
+
+  # Concat file
+  with open("input_clips.txt", "w") as f:
+    for clip in temp_clips:
+      f.write(f"file '{clip}'\n")
+
+  # Merge with main audio
   cmd = [
       "ffmpeg",
       "-y",
@@ -105,22 +200,25 @@ def create_ffmpeg_video(image_paths, audio_path, output_video_path):
       "-safe",
       "0",
       "-i",
-      "input.txt",
+      "input_clips.txt",
       "-i",
       audio_path,
       "-c:v",
-      "libx264",
-      "-vf",
-      "fps=24,format=yuv420p",
+      "copy",
       "-c:a",
       "aac",
-      "-shortest",
+      "-t",
+      str(total_duration),
       output_video_path,
   ]
   subprocess.run(cmd, check=True)
 
-  if os.path.exists("input.txt"):
-    os.remove("input.txt")
+  # Cleanup Temp Files
+  if os.path.exists("input_clips.txt"):
+    os.remove("input_clips.txt")
+  for clip in temp_clips:
+    if os.path.exists(clip):
+      os.remove(clip)
 
 
 # Main Workflow
@@ -128,41 +226,42 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating clear voice & matched visuals..."):
+    with st.spinner("Creating fast-voice documentary..."):
       try:
-        # Step 1: Audio Generation
+        # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Split Script Line by Line
-        raw_lines = re.split(r"[\n।!?,\.-]+", text_input)
-        sentences = [l.strip() for l in raw_lines if len(l.strip()) > 3]
+        # Step 2: Chunk script (8 words = ~4 to 5 seconds per scene)
+        raw_words = text_input.strip().split()
+        chunk_size = 8
+        sentences = [
+            " ".join(raw_words[i : i + chunk_size])
+            for i in range(0, len(raw_words), chunk_size)
+        ]
 
-        if not sentences:
-          sentences = [text_input.strip()]
+        media_list = []
 
-        image_files = []
-
-        # Step 3: Images Generation
+        # Step 3: Fetch Media
         for i, sentence in enumerate(sentences):
-          img = generate_realistic_image(sentence, i)
-          if img:
-            image_files.append(img)
+          m_path, m_type = fetch_media_for_scene(sentence, i)
+          if m_path:
+            media_list.append((m_path, m_type))
 
-        if not image_files:
-          st.error("Failed to generate visuals. Please try again.")
+        if not media_list:
+          st.error("Failed to fetch visuals. Please try again.")
         else:
-          # Step 4: Render Synchronized MP4
+          # Step 4: Render Video
           final_video = "final_documentary.mp4"
-          create_ffmpeg_video(image_files, audio_file, final_video)
+          create_mixed_documentary(media_list, audio_file, final_video)
 
-          st.success("✅ Complete Video Generated Successfully!")
+          st.success("✅ Fast Voice & Synchronized Video Ready!")
           st.video(final_video)
 
           # Cleanup
-          for img in image_files:
-            if os.path.exists(img):
-              os.remove(img)
+          for path, _ in media_list:
+            if os.path.exists(path):
+              os.remove(path)
           if os.path.exists(audio_file):
             os.remove(audio_file)
 
