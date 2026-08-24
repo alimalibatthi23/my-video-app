@@ -10,9 +10,9 @@ import streamlit as st
 
 # Page Setup
 st.set_page_config(
-    page_title="Documentary Video Generator", layout="centered"
+    page_title="Professional Documentary Generator", layout="centered"
 )
-st.title("🎬 Professional YouTube Urdu Documentary Generator")
+st.title("🎬 YouTube-Ready Urdu Documentary Generator")
 
 # Embedded Pexels API Key
 PEXELS_API_KEY = (
@@ -29,14 +29,38 @@ voice_code = selected_voice.split(" ")[0]
 text_input = st.text_area("Enter your full Urdu script here:", height=180)
 
 
-# 1. Deep Dark Voice Generator (-8Hz Pitch)
+# 1. Deep Dark Voice Generator (Optimized for Chromebook & Speed)
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
   CUSTOM_PITCH = "-8Hz"  # Deep voice
   CUSTOM_RATE = "+5%"  # Natural pacing
+
+  temp_raw_audio = "temp_raw_audio.mp3"
+
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
-  await communicate.save(output_filename)
+  await communicate.save(temp_raw_audio)
+
+  # Convert to Chromebook-compatible standard format using FFmpeg
+  cmd = [
+      "ffmpeg",
+      "-y",
+      "-i",
+      temp_raw_audio,
+      "-vn",
+      "-ar",
+      "44100",
+      "-ac",
+      "2",
+      "-b:a",
+      "192k",
+      output_filename,
+  ]
+  subprocess.run(cmd, check=True)
+
+  if os.path.exists(temp_raw_audio):
+    os.remove(temp_raw_audio)
+
   return True
 
 
@@ -129,7 +153,7 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Video Stitcher (Strict 16:9 Format)
+# 5. FFmpeg Video Stitcher with Cinematic Ken Burns (Zoom) Effect for YouTube Safety
 def create_mixed_documentary(media_items, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
   num_items = len(media_items)
@@ -139,6 +163,22 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
 
   for i, (path, media_type) in enumerate(media_items):
     out_clip = f"clip_{i:03d}.mp4"
+
+    # Alternate zoom directions to make it look professionally edited
+    if i % 2 == 0:
+      # Zoom In Effect
+      zoom_filter = (
+          "scale=2000:1125,"
+          f"zoompan=z='min(zoom+0.0015,1.15)':d={int(duration_per_item*30)}:"
+          "s=1280x720:fps=30"
+      )
+    else:
+      # Pan/Standard high-quality crop
+      zoom_filter = (
+          "scale=1280:720:force_original_aspect_ratio=decrease,"
+          "pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=30"
+      )
+
     if media_type == "image":
       cmd = [
           "ffmpeg",
@@ -150,7 +190,11 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
           "-t",
           f"{duration_per_item:.2f}",
           "-vf",
-          "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+          f"{zoom_filter},format=yuv420p",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
           out_clip,
       ]
     else:
@@ -164,7 +208,11 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
           "-t",
           f"{duration_per_item:.2f}",
           "-vf",
-          "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+          "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
           "-an",
           out_clip,
       ]
@@ -176,7 +224,7 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
     for clip in temp_clips:
       f.write(f"file '{clip}'\n")
 
-  # Merge Visuals & Audio
+  # Merge Visuals & Audio cleanly
   cmd = [
       "ffmpeg",
       "-y",
@@ -189,9 +237,15 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
       "-i",
       audio_path,
       "-c:v",
-      "copy",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      "23",
       "-c:a",
       "aac",
+      "-b:a",
+      "192k",
       "-t",
       str(total_duration),
       output_video_path,
@@ -211,7 +265,9 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Processing 7-8 second scene transitions..."):
+    with st.spinner(
+        "Applying cinematic effects and rendering YouTube-safe documentary..."
+    ):
       try:
         # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
@@ -240,7 +296,7 @@ if st.button("Generate Complete Video"):
           final_video = "final_documentary.mp4"
           create_mixed_documentary(media_list, audio_file, final_video)
 
-          st.success("✅ YouTube Video with 7-8s Scenes Ready!")
+          st.success("✅ YouTube-Ready Cinematic Documentary Generated!")
           st.video(final_video)
 
           # Final Cleanup
