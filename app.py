@@ -12,7 +12,7 @@ st.set_page_config(page_title="Documentary AI Video Generator", page_icon="🎬"
 st.title("🎬 Documentary-Style AI Video Generator")
 st.write("Generate high-quality documentary videos with deep voiceovers!")
 
-# Voices setup
+# Reliable Deep Voices
 VOICES = {
     "Urdu Deep Male (Asad)": "ur-PK-AsadNeural",
     "Hindi Deep Male (Madhur)": "hi-IN-MadhurNeural",
@@ -26,8 +26,13 @@ selected_voice = VOICES[voice_option]
 script_input = st.text_area("Enter your script / topic:", height=150, placeholder="Enter script here...")
 
 async def generate_audio(text, voice, output_filename):
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(output_filename)
+    try:
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(output_filename)
+    except Exception:
+        # Fallback to English US voice if selected voice fails
+        communicate = edge_tts.Communicate(text, "en-US-ChristopherNeural")
+        await communicate.save(output_filename)
 
 def get_pollinations_image(prompt):
     url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}?width=1280&height=720&nologo=true"
@@ -42,7 +47,8 @@ if st.button("Generate Video"):
         st.warning("Please enter a script or topic first.")
     else:
         st.info("Processing video generation...")
-        lines = [line.strip() for line in script_input.split('.') if line.strip()]
+        # Clean text lines
+        lines = [line.strip() for line in script_input.replace('\n', ' ').split('.') if line.strip()]
         if not lines:
             lines = [script_input.strip()]
             
@@ -62,7 +68,7 @@ if st.button("Generate Video"):
             image = get_pollinations_image(f"cinematic documentary style, {line}")
             image_np = np.array(image)
             
-            # 3. Create Video Clip (Fixed Resize Line)
+            # 3. Create Video Clip
             img_clip = ImageClip(image_np).set_duration(duration)
             img_clip = img_clip.resize(width=1280, height=720)
             img_clip = img_clip.set_audio(audio_clip)
