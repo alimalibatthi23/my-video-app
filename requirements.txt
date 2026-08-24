@@ -3,4 +3,4 @@ edge-tts
 gTTS
 requests
 deep-translator
-moviepy
+ffmpeg-python
