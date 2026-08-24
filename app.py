@@ -48,10 +48,10 @@ def translate_to_english(urdu_text: str):
     return urdu_text
 
 
-# 3. Smart Pexels Stock Video Fetcher (Contextual Video Clips)
-def fetch_pexels_video_for_scene(scene_prompt_urdu: str, index: int):
+# 3. Smart Pexels Stock Video Fetcher & Ultra HD Fallback Image
+def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   english_context = translate_to_english(scene_prompt_urdu)
-  query = urllib.parse.quote(english_context[:50])  # Use short query for video search
+  query = urllib.parse.quote(english_context[:40])
   
   headers = {
       "Authorization": PEXELS_API_KEY
@@ -64,7 +64,6 @@ def fetch_pexels_video_for_scene(scene_prompt_urdu: str, index: int):
       data = res.json()
       videos = data.get("videos", [])
       if videos:
-        # Get HD video file link
         video_files = videos[0].get("video_files", [])
         hd_file = next((v for v in video_files if v.get("quality") == "hd" or v.get("width", 0) >= 1280), None)
         if not hd_file and video_files:
@@ -81,10 +80,10 @@ def fetch_pexels_video_for_scene(scene_prompt_urdu: str, index: int):
   except Exception:
     pass
 
-  # Fallback to Pollinations AI Image if video search fails
-  quality_boost = "cinematic documentary photography representing this exact scene, highly detailed, 8k, photorealistic"
+  # Fallback to Ultra HD AI Image with crisp English text capability if video fails
+  quality_boost = "cinematic documentary masterclass photography, 8k resolution, photorealistic, sharp focus"
   final_prompt = urllib.parse.quote(f"{english_context}, {quality_boost}")
-  img_url = f"https://image.pollinations.ai/prompt/{final_prompt}?width=1280&height=720&model=flux&nologo=true&seed={index*77}"
+  img_url = f"https://image.pollinations.ai/prompt/{final_prompt}?width=1280&height=720&model=flux&nologo=true&seed={index*55}"
 
   try:
     img_res = requests.get(img_url, timeout=25)
@@ -117,27 +116,30 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Video Stitcher for Mixed Videos & Images with Subtitles
+# 5. FFmpeg Stitcher with Clean Translated Subtitles (No broken boxes)
 def create_mixed_documentary(media_items_with_text, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
   num_items = len(media_items_with_text)
   
   ideal_duration_per_item = total_duration / num_items
-  duration_per_item = min(ideal_duration_per_item, 8.0)
+  duration_per_item = min(ideal_duration_per_item, 7.0)
 
   temp_clips = []
 
   for i, (path, media_type, scene_text) in enumerate(media_items_with_text):
     out_clip = f"clip_{i:03d}.mp4"
     
-    clean_text = scene_text.replace("'", "").replace('"', "").replace(":", "-")
-    if len(clean_text) > 40:
-      clean_text = clean_text[:37] + "..."
+    # Translate script chunk to English for clean, professional subtitles without font glitching
+    english_subtitle = translate_to_english(scene_text)
+    clean_text = english_subtitle.replace("'", "").replace('"', "").replace(":", "-")
+    if len(clean_text) > 50:
+      clean_text = clean_text[:47] + "..."
 
+    # Crisp text filter using standard English font to ensure zero broken boxes
     filter_chain = (
         "scale=1280:720:force_original_aspect_ratio=decrease,"
         "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
-        f"drawtext=text='{clean_text}':fontcolor=white:fontsize=28:box=1:boxcolor=black@0.5:boxborderw=4:x=(w-text_w)/2:y=630,"
+        f"drawtext=text='{clean_text}':fontcolor=white:fontsize=26:box=1:boxcolor=black@0.6:boxborderw=5:x=(w-text_w)/2:y=630,"
         "fps=25,format=yuv420p"
     )
 
@@ -181,7 +183,7 @@ def create_mixed_documentary(media_items_with_text, audio_path, output_video_pat
     for clip in temp_clips:
       f.write(f"file '{clip}'\n")
 
-  # Merge Visuals & Audio for Chromebook playback
+  # Merge Visuals & Audio for seamless Chromebook playback
   cmd = [
       "ffmpeg",
       "-y",
@@ -218,15 +220,15 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Fetching matching Pexels stock videos, audio & rendering..."):
+    with st.spinner("Generating professional documentary with mixed media & clean subtitles..."):
       try:
         # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Split script into context chunks (~8 words per chunk)
+        # Step 2: Split script into perfect context chunks
         raw_words = text_input.strip().split()
-        chunk_size = 8
+        chunk_size = 7
         sentences = [
             " ".join(raw_words[i : i + chunk_size])
             for i in range(0, len(raw_words), chunk_size)
@@ -234,20 +236,20 @@ if st.button("Generate Complete Video"):
 
         media_list_with_text = []
 
-        # Step 3: Fetch Stock Videos or Fallback Images matching context
+        # Step 3: Fetch Media matching context
         for i, sentence in enumerate(sentences):
-          m_path, m_type = fetch_pexels_video_for_scene(sentence, i)
+          m_path, m_type = fetch_media_for_scene(sentence, i)
           if m_path:
             media_list_with_text.append((m_path, m_type, sentence))
 
         if not media_list_with_text:
           st.error("Failed to generate visuals. Please try again.")
         else:
-          # Step 4: Final Rendering with Mixed Media & Subtitles
+          # Step 4: Final Rendering
           final_video = "final_documentary.mp4"
           create_mixed_documentary(media_list_with_text, audio_file, final_video)
 
-          st.success("✅ Professional Video Ready with Stock Videos, Subtitles & Chromebook Support!")
+          st.success("✅ Professional High-Quality Documentary Ready!")
           st.video(final_video)
 
           # Final Cleanup
