@@ -3,14 +3,13 @@ import os
 import re
 import urllib.parse
 import edge_tts
-from moviepy.editor import AudioFileClip, ImageSequenceClip
 import requests
 import streamlit as st
 
 st.set_page_config(
     page_title="Documentary Video Generator", layout="centered"
 )
-st.title("🎬 Complete Documentary Video Generator")
+st.title("🎬 Documentary Audio & Auto-Slide Video Generator")
 
 selected_voice = st.selectbox(
     "Select Voice", options=["ur-PK-AsadNeural (Urdu Male Deep Voice)"]
@@ -42,12 +41,13 @@ def generate_realistic_image(scene_prompt: str, index: int):
   final_prompt = scene_prompt + quality_boost
   encoded_prompt = urllib.parse.quote(final_prompt)
 
+  # Using Flux Model for Realistic Output
   url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&model=flux&nologo=true"
 
   try:
     res = requests.get(url, timeout=30)
     if res.status_code == 200:
-      img_path = f"temp_scene_{index}.jpg"
+      img_path = f"scene_{index}.jpg"
       with open(img_path, "wb") as f:
         f.write(res.content)
       return img_path
@@ -55,41 +55,18 @@ def generate_realistic_image(scene_prompt: str, index: int):
     return None
 
 
-# 3. Combine Audio + Images into MP4 Video
-def create_video(image_paths, audio_path, output_video_path):
-  audio_clip = AudioFileClip(audio_path)
-  audio_duration = audio_clip.duration
-
-  # Calculate duration per image so all images cover full audio length
-  num_images = len(image_paths)
-  duration_per_image = max(3.0, audio_duration / num_images)
-
-  # Create Video Clip
-  video_clip = ImageSequenceClip(image_paths, durations=[duration_per_image] * num_images)
-  video_clip = video_clip.set_audio(audio_clip)
-
-  # Save Final MP4 Video
-  video_clip.write_videofile(
-      output_video_path, fps=24, codec="libx264", audio_codec="aac"
-  )
-
-  # Close clips to free memory
-  audio_clip.close()
-  video_clip.close()
-
-
-# Main Action
-if st.button("Generate Complete Video"):
+# Action Button
+if st.button("Generate Video Content"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating voice, scenes, and rendering final MP4 video..."):
+    with st.spinner("Generating deep audio and 8K documentary scenes..."):
       try:
         # Step 1: Generate Audio
-        audio_file = "temp_audio.mp3"
+        audio_file = "output_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Split Script and Generate Images
+        # Step 2: Split Text into Scenes
         sentences = [
             s.strip()
             for s in re.split(r"[।!?,\n]+", text_input)
@@ -100,26 +77,24 @@ if st.button("Generate Complete Video"):
         for i, sentence in enumerate(sentences):
           img = generate_realistic_image(sentence, i)
           if img:
-            image_files.append(img)
+            image_files.append((img, sentence))
 
-        # Fallback if no images were generated
-        if not image_files:
-          st.error("Could not generate images for the video.")
-        else:
-          # Step 3: Render MP4 Video
-          final_video = "final_documentary.mp4"
-          create_video(image_files, audio_file, final_video)
+        st.success("✅ Content Generated Successfully!")
 
-          # Step 4: Show Final Combined Video Output
-          st.success("✅ Final Documentary Video Ready!")
-          st.video(final_video)
+        # Display Audio First
+        st.subheader("🔊 Documentary Voice")
+        st.audio(audio_file)
 
-          # Clean up temporary images
-          for img in image_files:
-            if os.path.exists(img):
-              os.remove(img)
-          if os.path.exists(audio_file):
-            os.remove(audio_file)
+        # Display Realistic Scenes Sequence
+        st.subheader("🖼️ Realistic 8K Scenes (Changes per line)")
+        cols = st.columns(2)
+        for idx, (img_path, caption_text) in enumerate(image_files):
+          with cols[idx % 2]:
+            st.image(
+                img_path,
+                caption=f"Scene {idx+1}: {caption_text[:40]}...",
+                use_container_width=True,
+            )
 
       except Exception as e:
-        st.error(f"Error generating video: {e}")
+        st.error(f"Error: {e}")
