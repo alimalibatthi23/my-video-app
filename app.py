@@ -1,25 +1,12 @@
 import asyncio
 import os
 import re
+import subprocess
 import urllib.parse
 from deep_translator import GoogleTranslator
 import edge_tts
 import requests
 import streamlit as st
-
-# Safe Imports for MoviePy Compatibility (v1 & v2)
-try:
-  from moviepy.editor import (
-      AudioFileClip,
-      ConcatenateVideoClips,
-      ImageClip,
-  )
-except ImportError:
-  from moviepy.audio.io.AudioFileClip import AudioFileClip
-  from moviepy.video.compositing.concatenate import (
-      concatenate_videoclips as ConcatenateVideoClips,
-  )
-  from moviepy.video.VideoClip import ImageClip
 
 st.set_page_config(
     page_title="Documentary Video Generator", layout="centered"
@@ -31,15 +18,13 @@ selected_voice = st.selectbox(
 )
 voice_code = selected_voice.split(" ")[0]
 
-text_input = st.text_area(
-    "Enter your full Urdu script here:", height=180
-)
+text_input = st.text_area("Enter your full Urdu script here:", height=180)
 
 
 # 1. Clear & Deep Urdu Voice Generator
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  CUSTOM_PITCH = "-10Hz"  # भारी डॉक्यूमेंट्री आवाज़
-  CUSTOM_RATE = "-5%"  # नेचुरल स्पीड
+  CUSTOM_PITCH = "-10Hz"
+  CUSTOM_RATE = "-5%"
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
@@ -47,13 +32,10 @@ async def generate_audio(text: str, output_filename: str, preferred_voice: str):
   return True
 
 
-# 2. Urdu to English Translation for Accurate Visuals
+# 2. Urdu to English Translation
 def translate_to_english(urdu_text: str):
   try:
-    translated = GoogleTranslator(source="auto", target="en").translate(
-        urdu_text
-    )
-    return translated
+    return GoogleTranslator(source="auto", target="en").translate(urdu_text)
   except Exception:
     return urdu_text
 
@@ -74,7 +56,7 @@ def generate_realistic_image(scene_prompt_urdu: str, index: int):
   try:
     res = requests.get(url, timeout=35)
     if res.status_code == 200:
-      img_path = f"scene_{index}.jpg"
+      img_path = f"scene_{index:03d}.jpg"
       with open(img_path, "wb") as f:
         f.write(res.content)
       return img_path
@@ -82,28 +64,60 @@ def generate_realistic_image(scene_prompt_urdu: str, index: int):
     return None
 
 
-# 4. Multi-Image Frame-by-Frame Sync Video Rendering
-def create_synchronized_video(image_paths, audio_path, output_video_path):
-  audio_clip = AudioFileClip(audio_path)
-  total_duration = audio_clip.duration
+# 4. Get Audio Duration
+def get_audio_duration(audio_path):
+  cmd = [
+      "ffprobe",
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "default=noprint_wrappers=1:nokey=1",
+      audio_path,
+  ]
+  result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+  return float(result.stdout)
 
+
+# 5. Native FFmpeg Video Creator (No MoviePy Errors)
+def create_ffmpeg_video(image_paths, audio_path, output_video_path):
+  total_duration = get_audio_duration(audio_path)
   num_images = len(image_paths)
   duration_per_image = total_duration / num_images
 
-  clips = []
-  for img_path in image_paths:
-    img_clip = ImageClip(img_path).set_duration(duration_per_image)
-    clips.append(img_clip)
+  # Create concat file for ffmpeg
+  with open("input.txt", "w") as f:
+    for img in image_paths:
+      f.write(f"file '{img}'\n")
+      f.write(f"duration {duration_per_image}\n")
+    f.write(f"file '{image_paths[-1]}'\n")
 
-  video_clip = ConcatenateVideoClips(clips, method="compose")
-  video_clip = video_clip.set_audio(audio_clip)
+  # Run FFmpeg command directly
+  cmd = [
+      "ffmpeg",
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      "input.txt",
+      "-i",
+      audio_path,
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-shortest",
+      output_video_path,
+  ]
+  subprocess.run(cmd, check=True)
 
-  video_clip.write_videofile(
-      output_video_path, fps=24, codec="libx264", audio_codec="aac"
-  )
-
-  audio_clip.close()
-  video_clip.close()
+  if os.path.exists("input.txt"):
+    os.remove("input.txt")
 
 
 # Main Workflow
@@ -119,7 +133,7 @@ if st.button("Generate Complete Video"):
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Clean Split Script Line by Line
+        # Step 2: Split Script Line by Line
         raw_lines = re.split(r"[\n।!?\.]+", text_input)
         sentences = [l.strip() for l in raw_lines if len(l.strip()) > 3]
 
@@ -128,7 +142,7 @@ if st.button("Generate Complete Video"):
 
         image_files = []
 
-        # Step 3: Generate Matched Images for Each Line
+        # Step 3: Generate Images
         for i, sentence in enumerate(sentences):
           img = generate_realistic_image(sentence, i)
           if img:
@@ -137,11 +151,11 @@ if st.button("Generate Complete Video"):
         if not image_files:
           st.error("Failed to generate visuals. Please try again.")
         else:
-          # Step 4: Render Multi-Image Synchronized MP4
+          # Step 4: Render MP4 Video via System FFmpeg
           final_video = "final_documentary.mp4"
-          create_synchronized_video(image_files, audio_file, final_video)
+          create_ffmpeg_video(image_files, audio_file, final_video)
 
-          st.success("✅ Synchronized Multi-Image Video Created!")
+          st.success("✅ Complete Video Generated Successfully!")
           st.video(final_video)
 
           # Cleanup
