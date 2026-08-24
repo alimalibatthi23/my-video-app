@@ -4,9 +4,22 @@ import re
 import urllib.parse
 from deep_translator import GoogleTranslator
 import edge_tts
-from moviepy.editor import AudioFileClip, ImageClip, ConcatenateVideoClips
 import requests
 import streamlit as st
+
+# Safe Imports for MoviePy Compatibility (v1 & v2)
+try:
+  from moviepy.editor import (
+      AudioFileClip,
+      ConcatenateVideoClips,
+      ImageClip,
+  )
+except ImportError:
+  from moviepy.audio.io.AudioFileClip import AudioFileClip
+  from moviepy.video.compositing.concatenate import (
+      concatenate_videoclips as ConcatenateVideoClips,
+  )
+  from moviepy.video.VideoClip import ImageClip
 
 st.set_page_config(
     page_title="Documentary Video Generator", layout="centered"
@@ -25,8 +38,8 @@ text_input = st.text_area(
 
 # 1. Clear & Deep Urdu Voice Generator
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  CUSTOM_PITCH = "-10Hz"  # भारी आवाज़
-  CUSTOM_RATE = "-5%"    # सही स्पीड (बहुत स्लो नहीं)
+  CUSTOM_PITCH = "-10Hz"  # भारी डॉक्यूमेंट्री आवाज़
+  CUSTOM_RATE = "-5%"  # नेचुरल स्पीड
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
@@ -98,14 +111,16 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating deep voice, matching visuals & rendering MP4..."):
+    with st.spinner(
+        "Generating deep voice, matching visuals & rendering MP4..."
+    ):
       try:
         # Step 1: Generate Clear Audio
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
         # Step 2: Clean Split Script Line by Line
-        raw_lines = re.split(r'[\n।!?\.]+', text_input)
+        raw_lines = re.split(r"[\n।!?\.]+", text_input)
         sentences = [l.strip() for l in raw_lines if len(l.strip()) > 3]
 
         if not sentences:
