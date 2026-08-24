@@ -48,7 +48,7 @@ def translate_to_english(urdu_text: str):
     return urdu_text
 
 
-# 3. Fetch Media (Guaranteed AI Image/Video generation)
+# 3. Fetch Media (AI Image Generation)
 def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   english_prompt = translate_to_english(scene_prompt_urdu)
   query = urllib.parse.quote(english_prompt)
@@ -57,7 +57,6 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   }
 
-  # Direct AI Image Generation (Most stable and cinematic for YouTube documentaries)
   quality_boost = (
       "cinematic documentary masterclass photography, highly detailed, 8k resolution, dramatic lighting, photorealistic"
   )
@@ -95,7 +94,7 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Video Stitcher (Safe & Error-Free Zoom & Text)
+# 5. FFmpeg Video Stitcher with Dynamic Subtitles (Script text on each scene)
 def create_mixed_documentary(media_items, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
   num_items = len(media_items)
@@ -103,15 +102,21 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
 
   temp_clips = []
 
-  for i, (path, media_type) in enumerate(media_items):
+  # We pass sentences to display exact scene text as subtitles
+  for i, (path, media_type, scene_text) in enumerate(media_items):
     out_clip = f"clip_{i:03d}.mp4"
     
-    # Safe filter chain to avoid exit status 234 errors
+    # Clean the scene text to avoid FFmpeg syntax breakages (removing quotes/colons)
+    clean_text = scene_text.replace("'", "").replace(":", "").replace('"', "")
+    # Limit subtitle length per scene so it fits nicely on screen
+    if len(clean_text) > 45:
+      clean_text = clean_text[:42] + "..."
+
+    # Subtitle overlay filter (drawtext) showing the exact script chunk
     filter_chain = (
         "scale=1280:720:force_original_aspect_ratio=decrease,"
         "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
-        f"zoompan=z='min(zoom+0.001,1.3)':d={int(duration_per_item*25)}:s=1280:720,"
-        "drawtext=text='Purely Peak':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=40,"
+        f"drawtext=text='{clean_text}':fontcolor=white:fontsize=32:box=1:boxcolor=black@0.5:boxborderw=5:x=(w-text_w)/2:y=h-80,"
         "fps=25,format=yuv420p"
     )
 
@@ -126,6 +131,8 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
         f"{duration_per_item:.2f}",
         "-vf",
         filter_chain,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
         out_clip,
     ]
     
@@ -153,6 +160,8 @@ def create_mixed_documentary(media_items, audio_path, output_video_path):
       "libx264",
       "-c:a",
       "aac",
+      "-pix_fmt",
+      "yuv420p",
       "-t",
       str(total_duration),
       output_video_path,
@@ -172,7 +181,7 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Generating cinematic AI visuals, voice, and rendering video..."):
+    with st.spinner("Generating AI visuals, voice, and rendering video with subtitles..."):
       try:
         # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
@@ -188,24 +197,24 @@ if st.button("Generate Complete Video"):
 
         media_list = []
 
-        # Step 3: Fetch Media
+        # Step 3: Fetch Media & Match with Sentences
         for i, sentence in enumerate(sentences):
           m_path, m_type = fetch_media_for_scene(sentence, i)
           if m_path:
-            media_list.append((m_path, m_type))
+            media_list.append((m_path, m_type, sentence))
 
         if not media_list:
           st.error("Failed to generate visuals. Please try again.")
         else:
-          # Step 4: Final Rendering
+          # Step 4: Final Rendering with Subtitles
           final_video = "final_documentary.mp4"
           create_mixed_documentary(media_list, audio_file, final_video)
 
-          st.success("✅ Professional YouTube Documentary Ready for Monetization!")
+          st.success("✅ Professional Video Ready with Dynamic Subtitles & Chromebook Support!")
           st.video(final_video)
 
           # Final Cleanup
-          for path, _ in media_list:
+          for path, _, _ in media_list:
             if os.path.exists(path):
               os.remove(path)
           if os.path.exists(audio_file):
