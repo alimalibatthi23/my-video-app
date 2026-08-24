@@ -14,17 +14,18 @@ st.set_page_config(
 st.title("🎬 Professional Urdu Documentary Video Generator")
 
 selected_voice = st.selectbox(
-    "Select Voice", options=["ur-PK-AsadNeural (Urdu Male Deep Voice)"]
+    "Select Voice", options=["ur-PK-AsadNeural (Urdu Male Voice)"]
 )
 voice_code = selected_voice.split(" ")[0]
 
 text_input = st.text_area("Enter your full Urdu script here:", height=180)
 
 
-# 1. Clear & Deep Urdu Voice Generator
+# 1. Clear, Fast & Natural Urdu Voice Generator
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  CUSTOM_PITCH = "-10Hz"
-  CUSTOM_RATE = "-5%"
+  # Normal speed & clear voice (no pitch lag)
+  CUSTOM_PITCH = "+0Hz"
+  CUSTOM_RATE = "+5%"  # आवाज़ की स्पीड थोड़ी बढ़ा दी है ताकि स्लो न लगे
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
@@ -76,24 +77,26 @@ def get_audio_duration(audio_path):
       "default=noprint_wrappers=1:nokey=1",
       audio_path,
   ]
-  result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-  return float(result.stdout)
+  result = subprocess.run(
+      cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+  )
+  return float(result.stdout.strip())
 
 
-# 5. Native FFmpeg Video Creator (No MoviePy Errors)
+# 5. FFmpeg Video Creator with Exact Image Timing
 def create_ffmpeg_video(image_paths, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
   num_images = len(image_paths)
   duration_per_image = total_duration / num_images
 
-  # Create concat file for ffmpeg
+  # Create FFmpeg concat file with exact timing per scene
   with open("input.txt", "w") as f:
     for img in image_paths:
       f.write(f"file '{img}'\n")
-      f.write(f"duration {duration_per_image}\n")
+      f.write(f"duration {duration_per_image:.2f}\n")
     f.write(f"file '{image_paths[-1]}'\n")
 
-  # Run FFmpeg command directly
+  # Run FFmpeg command
   cmd = [
       "ffmpeg",
       "-y",
@@ -107,8 +110,8 @@ def create_ffmpeg_video(image_paths, audio_path, output_video_path):
       audio_path,
       "-c:v",
       "libx264",
-      "-pix_fmt",
-      "yuv420p",
+      "-vf",
+      "fps=24,format=yuv420p",
       "-c:a",
       "aac",
       "-shortest",
@@ -125,16 +128,14 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner(
-        "Generating deep voice, matching visuals & rendering MP4..."
-    ):
+    with st.spinner("Generating clear voice & matched visuals..."):
       try:
-        # Step 1: Generate Clear Audio
+        # Step 1: Audio Generation
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
         # Step 2: Split Script Line by Line
-        raw_lines = re.split(r"[\n।!?\.]+", text_input)
+        raw_lines = re.split(r"[\n।!?,\.-]+", text_input)
         sentences = [l.strip() for l in raw_lines if len(l.strip()) > 3]
 
         if not sentences:
@@ -142,7 +143,7 @@ if st.button("Generate Complete Video"):
 
         image_files = []
 
-        # Step 3: Generate Images
+        # Step 3: Images Generation
         for i, sentence in enumerate(sentences):
           img = generate_realistic_image(sentence, i)
           if img:
@@ -151,7 +152,7 @@ if st.button("Generate Complete Video"):
         if not image_files:
           st.error("Failed to generate visuals. Please try again.")
         else:
-          # Step 4: Render MP4 Video via System FFmpeg
+          # Step 4: Render Synchronized MP4
           final_video = "final_documentary.mp4"
           create_ffmpeg_video(image_files, audio_file, final_video)
 
