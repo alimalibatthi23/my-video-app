@@ -12,9 +12,9 @@ import streamlit as st
 st.set_page_config(
     page_title="Documentary Video Generator", layout="centered"
 )
-st.title("🎬 Professional Urdu Documentary Video Generator")
+st.title("🎬 Professional YouTube Urdu Documentary Generator")
 
-# Embedded API Key (No Sidebar Needed)
+# Embedded Pexels API Key
 PEXELS_API_KEY = (
     "3Z0S20rEAy3MB9A2IFJhG25UkJzFksRJBB4iAAN9g9sZ9ha0eqTcJslZ"
 )
@@ -29,10 +29,10 @@ voice_code = selected_voice.split(" ")[0]
 text_input = st.text_area("Enter your full Urdu script here:", height=180)
 
 
-# 1. Clear & Fast Voice Generator (+30% Speed)
+# 1. Deep Dark Voice Generator (-8Hz Pitch)
 async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  CUSTOM_PITCH = "+0Hz"
-  CUSTOM_RATE = "+30%"
+  CUSTOM_PITCH = "-8Hz"  # Deep voice
+  CUSTOM_RATE = "+5%"  # Natural pacing
   communicate = edge_tts.Communicate(
       text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
@@ -48,21 +48,25 @@ def translate_to_english(urdu_text: str):
     return urdu_text
 
 
-# 3. Fetch Video Clips or Photos
+# 3. Fetch YouTube Landscape (16:9) Media
 def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   english_prompt = translate_to_english(scene_prompt_urdu)
   query = urllib.parse.quote(english_prompt)
 
-  # Step A: Try Pexels Video Clip
+  # Step A: Pexels Landscape Video
   try:
     headers = {"Authorization": PEXELS_API_KEY}
-    video_url = f"https://api.pexels.com/videos/search?query={query}&per_page=1"
+    video_url = f"https://api.pexels.com/videos/search?query={query}&orientation=landscape&per_page=1"
     res = requests.get(video_url, headers=headers, timeout=10).json()
 
     if res.get("videos") and len(res["videos"]) > 0:
       video_files = res["videos"][0]["video_files"]
       download_url = next(
-          (v["link"] for v in video_files if v.get("height") == 720),
+          (
+              v["link"]
+              for v in video_files
+              if v.get("width", 0) > v.get("height", 0)
+          ),
           video_files[0]["link"],
       )
       vid_data = requests.get(download_url, timeout=20).content
@@ -73,10 +77,10 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   except Exception:
     pass
 
-  # Step B: Try Pexels High Quality Photo
+  # Step B: Pexels Landscape Photo
   try:
     headers = {"Authorization": PEXELS_API_KEY}
-    photo_url = f"https://api.pexels.com/v1/search?query={query}&per_page=1"
+    photo_url = f"https://api.pexels.com/v1/search?query={query}&orientation=landscape&per_page=1"
     res = requests.get(photo_url, headers=headers, timeout=10).json()
 
     if res.get("photos") and len(res["photos"]) > 0:
@@ -125,7 +129,7 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Video Stitcher
+# 5. FFmpeg Video Stitcher (Strict 16:9 Format)
 def create_mixed_documentary(media_items, audio_path, output_video_path):
   total_duration = get_audio_duration(audio_path)
   num_items = len(media_items)
@@ -207,15 +211,15 @@ if st.button("Generate Complete Video"):
   if not text_input.strip():
     st.warning("Please enter your script first!")
   else:
-    with st.spinner("Processing documentary video..."):
+    with st.spinner("Processing 7-8 second scene transitions..."):
       try:
         # Step 1: Voice Generation
         audio_file = "temp_voice.mp3"
         asyncio.run(generate_audio(text_input, audio_file, voice_code))
 
-        # Step 2: Split script (~4-5 seconds per scene)
+        # Step 2: Split script (~14 words = approx 7 to 8 seconds per scene)
         raw_words = text_input.strip().split()
-        chunk_size = 8
+        chunk_size = 14
         sentences = [
             " ".join(raw_words[i : i + chunk_size])
             for i in range(0, len(raw_words), chunk_size)
@@ -236,7 +240,7 @@ if st.button("Generate Complete Video"):
           final_video = "final_documentary.mp4"
           create_mixed_documentary(media_list, audio_file, final_video)
 
-          st.success("✅ Documentary Generated Successfully!")
+          st.success("✅ YouTube Video with 7-8s Scenes Ready!")
           st.video(final_video)
 
           # Final Cleanup
