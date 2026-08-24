@@ -2,22 +2,18 @@ import asyncio
 import os
 import time
 import edge_tts
-import streamlit as st
 
 
-# Safe audio generator function supporting English, Urdu, and Hindi
-async def generate_audio_safe(
+# Safe audio generator replacing the old generate_audio function
+async def generate_audio(
     text: str, output_filename: str, preferred_voice: str = "en-US-ChristopherNeural"
 ):
   fallback_voices = [
       preferred_voice,
-      # English Voices
-      "en-US-ChristopherNeural",
-      "en-US-JennyNeural",
-      # Urdu Voices
+      "en-US-ChristopherNeural",  # English Male
+      "en-US-JennyNeural",  # English Female
       "ur-PK-AsadNeural",  # Urdu Male
       "ur-PK-UzmaNeural",  # Urdu Female
-      # Hindi Voices
       "hi-IN-MadhurNeural",  # Hindi Male
       "hi-IN-SwaraNeural",  # Hindi Female
   ]
@@ -38,11 +34,6 @@ async def generate_audio_safe(
       except Exception:
         time.sleep(2)
 
-  raise Exception("Audio generation failed. Please try again.")
-
-
-# Execution block to trigger the audio generation
-try:
-  asyncio.run(generate_audio_safe(line, audio_file, selected_voice))
-except Exception as e:
-  st.error(f"Audio Error: {e}")
+  raise Exception(
+      "Audio generation failed after retries. Please try again."
+  )
