@@ -19,44 +19,56 @@ PEXELS_API_KEY = (
     "3Z0S20rEAy3MB9A2IFJhG25UkJzFksRJBB4iAAN9g9sZ9ha0eqTcJslZ"
 )
 
-# Voice Selection
-selected_voice = st.selectbox(
-    "Select Voice", options=["ur-PK-AsadNeural (Urdu Male Voice)"]
+# --- NEW: Language Selection Buttons/Radio ---
+language_option = st.radio(
+    "Select Output Language for Voiceover & Subtitles:",
+    options=["Urdu (اردو)", "English (انگریزی)"],
+    horizontal=True
 )
-voice_code = selected_voice.split(" ")[0]
 
-# Script Input Box
-text_input = st.text_area("Enter your full Urdu script here:", height=180)
+# Voice Configuration based on Selection (US Documentary Heavy/Dark Style)
+if "Urdu" in language_option:
+  voice_code = "ur-PK-AsadNeural"  # Urdu Male Voice
+else:
+  # US English deep/documentary style male voice
+  voice_code = "en-US-ChristopherNeural" 
+
+# Script/Prompt Input Box (English Input for Best Media Fetching)
+text_input = st.text_area(
+    "Enter your detailed English script or prompt here (App will fetch 4K/HD visuals based on this):", 
+    height=180
+)
 
 
-# 1. Deep Dark Voice Generator (-8Hz Pitch)
-async def generate_audio(text: str, output_filename: str, preferred_voice: str):
-  CUSTOM_PITCH = "-8Hz"
-  CUSTOM_RATE = "+5%"
+# 1. Deep Dark Voice Generator (-8Hz Pitch for Heavy Documentary Vibe)
+async def generate_audio(text: str, output_filename: str, preferred_voice: str, target_lang: str):
+  # Agar user ne Urdu select kiya hai aur input English hai, toh usay Urdu mein translate kar ke bolیں گے
+  text_to_speak = text
+  if "Urdu" in target_lang:
+    try:
+      text_to_speak = GoogleTranslator(source="en", target="ur").translate(text)
+    except Exception:
+      pass
+
+  CUSTOM_PITCH = "-8Hz"  # Bhari aur dark documentary voice ke liye
+  CUSTOM_RATE = "+0%"
+  
   communicate = edge_tts.Communicate(
-      text, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
+      text_to_speak, preferred_voice, pitch=CUSTOM_PITCH, rate=CUSTOM_RATE
   )
   await communicate.save(output_filename)
-  return True
+  return True, text_to_speak
 
 
-# 2. Urdu to English Translation
-def translate_to_english(urdu_text: str):
-  try:
-    return GoogleTranslator(source="auto", target="en").translate(urdu_text)
-  except Exception:
-    return urdu_text
-
-
-# 3. Smart Pexels Stock Video Fetcher & Ultra HD Fallback Image
-def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
-  english_context = translate_to_english(scene_prompt_urdu)
-  query = urllib.parse.quote(english_context[:40])
+# 2. Smart Pexels Stock Video Fetcher & Ultra HD Fallback Image
+def fetch_media_for_scene(scene_prompt: str, index: int):
+  # English prompt seedha Pexels ko jaye ga taake behtareen 4K/HD video aaye
+  query = urllib.parse.quote(scene_prompt[:100])
   
   headers = {
       "Authorization": PEXELS_API_KEY
   }
-  url = f"https://api.pexels.com/videos/search?query={query}&per_page=1"
+  url = f"https://api.pexels.com/videos/search?query={query}&per_page=5"
 
   try:
     res = requests.get(url, headers=headers, timeout=15)
@@ -64,13 +76,19 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
       data = res.json()
       videos = data.get("videos", [])
       if videos:
-        video_files = videos[0].get("video_files", [])
-        hd_file = next((v for v in video_files if v.get("quality") == "hd" or v.get("width", 0) >= 1280), None)
-        if not hd_file and video_files:
-          hd_file = video_files[0]
+        best_file = None
+        max_width = 0
         
-        if hd_file and "link" in hd_file:
-          vid_url = hd_file["link"]
+        for video in videos:
+          video_files = video.get("video_files", [])
+          for v in video_files:
+            width = v.get("width", 0)
+            if width >= max_width and "link" in v:
+              max_width = width
+              best_file = v
+        
+        if best_file and "link" in best_file:
+          vid_url = best_file["link"]
           vid_res = requests.get(vid_url, timeout=25)
           if vid_res.status_code == 200 and len(vid_res.content) > 10000:
             vid_path = f"media_{index:03d}.mp4"
@@ -80,8 +98,9 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   except Exception:
     pass
 
-  quality_boost = "cinematic documentary masterclass photography, 8k resolution, photorealistic, sharp focus"
-  final_prompt = urllib.parse.quote(f"{english_context}, {quality_boost}")
+  # Fallback to Pollinations AI with cinematic 8K parameters
+  quality_boost = "cinematic documentary masterclass photography, 8k resolution, photorealistic, sharp focus, highly detailed"
+  final_prompt = urllib.parse.quote(f"{scene_prompt}, {quality_boost}")
   img_url = f"https://image.pollinations.ai/prompt/{final_prompt}?width=1280&height=720&model=flux&nologo=true&seed={index*55}"
 
   try:
@@ -97,7 +116,7 @@ def fetch_media_for_scene(scene_prompt_urdu: str, index: int):
   return None, None
 
 
-# 4. Audio Duration Helper
+# 3. Audio Duration Helper
 def get_audio_duration(audio_path):
   cmd = [
       "ffprobe",
@@ -115,8 +134,8 @@ def get_audio_duration(audio_path):
   return float(result.stdout.strip())
 
 
-# 5. FFmpeg Stitcher with Dynamic Changing Subtitles per Scene
-def create_mixed_documentary(media_items_with_text, audio_path, output_video_path):
+# 4. FFmpeg Stitcher with Dynamic Subtitles
+def create_mixed_documentary(media_items_with_text, audio_path, output_video_path, target_lang):
   total_duration = get_audio_duration(audio_path)
   num_items = len(media_items_with_text)
   
@@ -128,11 +147,17 @@ def create_mixed_documentary(media_items_with_text, audio_path, output_video_pat
   for i, (path, media_type, scene_text) in enumerate(media_items_with_text):
     out_clip = f"clip_{i:03d}.mp4"
     
-    # Translate and format ONLY this specific chunk's text for its own subtitle
-    english_subtitle = translate_to_english(scene_text)
-    clean_text = english_subtitle.replace("'", "").replace('"', "").replace(":", "-")
-    if len(clean_text) > 45:
-      clean_text = clean_text[:42] + "..."
+    # Subtitle ki zuban tay karna
+    sub_text = scene_text
+    if "Urdu" in target_lang:
+      try:
+        sub_text = GoogleTranslator(source="en", target="ur").translate(scene_text)
+      except Exception:
+        pass
+
+    clean_text = sub_text.replace("'", "").replace('"', "").replace(":", "-")
+    if len(clean_text) > 55:
+      clean_text = clean_text[:52] + "..."
 
     filter_chain = (
         "scale=1280:720:force_original_aspect_ratio=decrease,"
@@ -213,15 +238,15 @@ def create_mixed_documentary(media_items_with_text, audio_path, output_video_pat
 # Main Workflow
 if st.button("Generate Complete Video"):
   if not text_input.strip():
-    st.warning("Please enter your script first!")
+    st.warning("Please enter your English script/prompt first!")
   else:
-    with st.spinner("Generating professional documentary with dynamic changing subtitles..."):
+    with st.spinner("Generating professional US-style documentary with high-res visuals..."):
       try:
         audio_file = "temp_voice.mp3"
-        asyncio.run(generate_audio(text_input, audio_file, voice_code))
+        success_audio, spoken_text = asyncio.run(generate_audio(text_input, audio_file, voice_code, language_option))
 
         raw_words = text_input.strip().split()
-        chunk_size = 7
+        chunk_size = 12
         sentences = [
             " ".join(raw_words[i : i + chunk_size])
             for i in range(0, len(raw_words), chunk_size)
@@ -238,9 +263,9 @@ if st.button("Generate Complete Video"):
           st.error("Failed to generate visuals. Please try again.")
         else:
           final_video = "final_documentary.mp4"
-          create_mixed_documentary(media_list_with_text, audio_file, final_video)
+          create_mixed_documentary(media_list_with_text, audio_file, final_video, language_option)
 
-          st.success("✅ Professional Documentary Ready with Dynamic Subtitles!")
+          st.success("✅ Professional Documentary Ready!")
           st.video(final_video)
 
           for path, _, _ in media_list_with_text:
